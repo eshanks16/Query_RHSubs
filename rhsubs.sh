@@ -18,6 +18,7 @@ SSO_TOKEN_URL="https://sso.redhat.com/auth/realms/redhat-external/protocol/openi
 CLIENT_ID="rhsm-api"
 V2_BASE="https://console.redhat.com/api/rhsm/v2"
 V1_BASE="https://api.access.redhat.com/management/v1"
+INV_BASE="https://console.redhat.com/api/inventory/v1"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -38,6 +39,10 @@ Default command: export
   organization                  Organization details
   manifests                     List manifests (Satellite/SAM)
   activation-keys               List activation keys
+
+── Inventory (HCC Inventory Service — recommended for SCA accounts) ─────────
+  inventory                     List all hosts from HCC Inventory (SCA)
+  inventory-host UUID           Get details for a single host
 
 ── Systems & Allocations (Customer Portal RHSM v1) ──────────────────────────
   systems                       List all registered systems
@@ -319,6 +324,56 @@ cmd_activation_keys() {
   Usage: \(.usage // "N/A")
   SCA:   \(.contentAccessMode // "N/A")
 ────────────────────────────────────────────────────────────────"'
+}
+
+##############################################################################
+# Inventory Commands (HCC Inventory Service)
+##############################################################################
+
+cmd_inventory() {
+    info "Querying HCC Inventory..."
+    local qs="?per_page=${LIMIT}&page=$(( OFFSET / LIMIT + 1 ))"
+    [[ -n "$FILTER" ]] && qs="${qs}&display_name=${FILTER}"
+
+    api_get "${INV_BASE}/hosts${qs}" || exit 1
+    if [[ "$OUTPUT_FORMAT" == "json" ]]; then output_json; return; fi
+
+    local total
+    total=$(echo "$API_BODY" | jq -r '.total // 0' 2>/dev/null)
+    echo ""
+    echo "HCC Inventory ($total total hosts):"
+    echo "────────────────────────────────────────────────────────────────"
+    print_table '
+        .results[]? |
+        "  ID:           \(.id // "N/A")
+  Display Name: \(.display_name // "N/A")
+  FQDN:         \(.fqdn // "N/A")
+  OS:           \(.system_profile.os_release // "N/A")
+  Updated:      \(.updated // "N/A")
+────────────────────────────────────────────────────────────────"'
+}
+
+cmd_inventory_host() {
+    local id=$1
+    [[ -z "$id" ]] && { err "host ID required."; exit 1; }
+    info "Querying host $id..."
+
+    api_get "${INV_BASE}/hosts/${id}" || exit 1
+    if [[ "$OUTPUT_FORMAT" == "json" ]]; then output_json; return; fi
+
+    echo ""
+    echo "Host $id:"
+    echo "────────────────────────────────────────────────────────────────"
+    print_table '
+        .results[0]? |
+        "  ID:           \(.id // "N/A")
+  Display Name: \(.display_name // "N/A")
+  FQDN:         \(.fqdn // "N/A")
+  OS:           \(.system_profile.os_release // "N/A")
+  Org ID:       \(.org_id // "N/A")
+  Reporter:     \(.reporter // "N/A")
+  Created:      \(.created // "N/A")
+  Updated:      \(.updated // "N/A")"'
 }
 
 ##############################################################################
@@ -639,6 +694,9 @@ main() {
     ok "Authenticated successfully."
 
     case "$command" in
+        # Inventory — HCC
+        inventory)                cmd_inventory ;;
+        inventory-host)           cmd_inventory_host "${args[0]:-}" ;;
         # V2 — HCC
         export)                   cmd_export ;;
         products)                 cmd_products ;;
